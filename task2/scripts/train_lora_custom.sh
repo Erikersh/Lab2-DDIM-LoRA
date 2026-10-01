@@ -1,20 +1,49 @@
+#!/bin/sh
+
+######## BEGIN TODO: experiment configuration ########
+# Configuration only: these defaults are complete; 
+# no implementation is required.
 export MODEL_NAME="CompVis/stable-diffusion-v1-4"
 export TRAIN_DATA_DIR="./sample_data/artistic-custom"
 export OUTPUT_DIR="./runs/artistic_custom"
+MIXED_PRECISION="no"
+IMAGE_COLUMN="image"
+CAPTION_COLUMN="text"
+RESOLUTION=512
+RANDOM_FLIP="true"
+TRAIN_BATCH_SIZE=1
+NUM_TRAIN_EPOCHS=100
+VALIDATION_EPOCHS=1
+CHECKPOINTING_STEPS=2000
+LEARNING_RATE="1e-04"
+LR_SCHEDULER="constant"
+LR_WARMUP_STEPS=0
+SEED=42
+CHECKPOINTS_TOTAL_LIMIT=2
+VALIDATION_PROMPT="a house"
+######## END TODO: experiment configuration ########
 
-accelerate launch --mixed_precision="no" train_lora.py \
-  --pretrained_model_name_or_path=$MODEL_NAME \
-  --output_dir=$OUTPUT_DIR \
-  --caption_column="text" \
-  --resolution=512 \
-  --random_flip \
-  --train_batch_size=1 \
-  --num_train_epochs=100 \
-  --validation_epochs 1 \
-  --checkpointing_steps=2000 \
-  --learning_rate=1e-04 \
-  --lr_scheduler="constant" \
-  --lr_warmup_steps=0 \
-  --seed=42 \
-  --checkpoints_total_limit 2 \
-  --validation_prompt="a house"
+set -- \
+  --mixed_precision="$MIXED_PRECISION" \
+  --pretrained_model_name_or_path="$MODEL_NAME" \
+  --output_dir="$OUTPUT_DIR" \
+  --train_data_dir="$TRAIN_DATA_DIR" \
+  --image_column="$IMAGE_COLUMN" \
+  --caption_column="$CAPTION_COLUMN" \
+  --resolution="$RESOLUTION" \
+  --train_batch_size="$TRAIN_BATCH_SIZE" \
+  --num_train_epochs="$NUM_TRAIN_EPOCHS" \
+  --validation_epochs="$VALIDATION_EPOCHS" \
+  --checkpointing_steps="$CHECKPOINTING_STEPS" \
+  --learning_rate="$LEARNING_RATE" \
+  --lr_scheduler="$LR_SCHEDULER" \
+  --lr_warmup_steps="$LR_WARMUP_STEPS" \
+  --seed="$SEED" \
+  --checkpoints_total_limit="$CHECKPOINTS_TOTAL_LIMIT" \
+  --validation_prompt="$VALIDATION_PROMPT"
+
+if [ "$RANDOM_FLIP" = "true" ]; then
+  set -- "$@" --random_flip
+fi
+
+accelerate launch --mixed_precision="$MIXED_PRECISION" train_lora.py "$@"

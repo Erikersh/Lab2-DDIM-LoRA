@@ -105,8 +105,12 @@ class DiffusionModule(nn.Module):
             x_t_prev = self.var_scheduler.step(x_t, t, net_out, predictor=self.predictor)
 
 
-            traj[-1] = traj[-1].cpu()
-            traj.append(x_t_prev.detach())
+            if return_traj:
+                traj[-1] = traj[-1].cpu()
+                traj.append(x_t_prev.detach())
+            else:
+                # Final-only sampling needs no saved history or CPU transfers.
+                traj = [x_t_prev.detach()]
 
         if return_traj:
             return traj
@@ -118,6 +122,7 @@ class DiffusionModule(nn.Module):
         hparams = {
             "network": self.network,
             "var_scheduler": self.var_scheduler,
+            "predictor": self.predictor,
             } 
         state_dict = self.state_dict()
 
@@ -131,5 +136,7 @@ class DiffusionModule(nn.Module):
 
         self.network = hparams["network"]
         self.var_scheduler = hparams["var_scheduler"]
+        # Older checkpoints need an explicit --predictor at sampling time.
+        self.predictor = hparams.get("predictor")
 
         self.load_state_dict(state_dict)
