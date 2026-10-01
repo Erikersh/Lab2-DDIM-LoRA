@@ -15,7 +15,8 @@ def extract(input, t: torch.Tensor, x: torch.Tensor):
 
 class BaseScheduler(nn.Module):
     def __init__(
-        self, num_train_timesteps: int, beta_1: float, beta_T: float, mode="linear"
+        self, num_train_timesteps: int, beta_1: float, beta_T: float, mode="linear",
+        betas: Optional[torch.Tensor] = None,
     ):
         super().__init__()
         self.num_train_timesteps = num_train_timesteps
@@ -24,7 +25,14 @@ class BaseScheduler(nn.Module):
             np.arange(0, self.num_train_timesteps)[::-1].copy().astype(np.int64)
         )
 
-        if mode == "linear":
+        if betas is not None:
+            # A pretrained checkpoint already contains its exact noise schedule.
+            betas = betas.detach().clone()
+            if betas.ndim != 1 or betas.numel() != num_train_timesteps:
+                raise ValueError("Saved betas must have one entry per training timestep.")
+            if not torch.isfinite(betas).all() or not ((betas > 0) & (betas < 1)).all():
+                raise ValueError("Saved betas must be finite and strictly between 0 and 1.")
+        elif mode == "linear":
             betas = torch.linspace(beta_1, beta_T, steps=num_train_timesteps)
         elif mode == "quad":
             betas = (
@@ -189,7 +197,7 @@ class DDPMScheduler(BaseScheduler):
         """
         
         if eps is None:
-            eps       = torch.randn(x_0.shape, device='cuda')
+            eps       = torch.randn_like(x_0)
 
         ######## TODO ########
         # DO NOT change the code outside this part.
@@ -208,8 +216,21 @@ class DDIMScheduler(BaseScheduler):
         mode: str = "linear",
         num_inference_timesteps: int = 50,
         eta: float = 0.0,
+        trained_scheduler: Optional[BaseScheduler] = None,
     ):
-        super().__init__(num_train_timesteps, beta_1, beta_T, mode)
+        if trained_scheduler is not None and num_train_timesteps != trained_scheduler.num_train_timesteps:
+            raise ValueError("DDIM must use the checkpoint's number of training timesteps.")
+        super().__init__(
+            num_train_timesteps, beta_1, beta_T, mode,
+            betas=None if trained_scheduler is None else trained_scheduler.betas,
+        )
+        if trained_scheduler is not None:
+            # Copy before the timestep TODO, which may cache inference coefficients.
+            self.alphas = trained_scheduler.alphas.detach().clone()
+            self.alphas_cumprod = trained_scheduler.alphas_cumprod.detach().clone()
+            self.schedule_mode = getattr(trained_scheduler, "schedule_mode", None)
+        else:
+            self.schedule_mode = mode
         self.eta = float(eta)
         self.set_inference_timesteps(num_inference_timesteps)
 

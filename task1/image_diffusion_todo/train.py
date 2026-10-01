@@ -167,6 +167,13 @@ def main(args):
             step += 1
             pbar.update(1)
 
+    # The last logging checkpoint can precede the final optimizer updates.
+    plt.plot(losses)
+    plt.savefig(f"{save_dir}/loss.png")
+    plt.close()
+    ddpm.save(f"{save_dir}/last.ckpt")
+    print(f"Saved the final checkpoint at step {step} to {save_dir}/last.ckpt")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -210,4 +217,3 @@ if __name__ == "__main__":
     config = DotMap()
     config.update(vars(args))
     main(args)
-    
