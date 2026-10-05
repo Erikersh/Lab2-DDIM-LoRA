@@ -48,7 +48,13 @@ class BaseScheduler(nn.Module):
             # 2. Convert alphā_t into betas using:
             #       beta_t = 1 - alphā_t / alphā_{t-1}
             # 3. Return betas as a tensor of shape [num_train_timesteps].
-            raise NotImplementedError("TODO: Implement cosine beta schedule here!")
+            steps = num_train_timesteps + 1
+            t = torch.linspace(0, num_train_timesteps, steps)
+            s = 0.008
+            f_t = torch.cos(((t / num_train_timesteps) + s) / (1 + s) * (torch.pi / 2)) ** 2
+            alphas_bar = f_t / f_t[0]
+            betas = 1 - (alphas_bar[1:] / alphas_bar[:-1])
+            betas = torch.clip(betas, 0.0001, 0.9999)
                
         else:
             raise NotImplementedError(f"{mode} is not implemented.")
@@ -131,7 +137,21 @@ class DDPMScheduler(BaseScheduler):
         # 3. Compute the posterior variance \tilde{β}_t = ((1-ᾱ_{t-1})/(1-ᾱ_t)) * β_t.
         # 4. Add Gaussian noise scaled by √(\tilde{β}_t) unless t == 0.
         # 5. Return the final sample at t-1.
-        sample_prev = None
+        t_tensor = torch.tensor([t], device=x_t.device)
+        beta_t = self._get_teeth(self.betas, t_tensor)
+        alpha_t = self._get_teeth(self.alphas, t_tensor)
+        alpha_bar_t = self._get_teeth(self.alphas_cumprod, t_tensor)
+        
+        mean = (x_t - (beta_t / torch.sqrt(1 - alpha_bar_t)) * eps_theta) / torch.sqrt(alpha_t)
+        
+        if t > 0:
+            t_prev_tensor = torch.tensor([t - 1], device=x_t.device)
+            alpha_bar_t_prev = self._get_teeth(self.alphas_cumprod, t_prev_tensor)
+            posterior_variance = ((1 - alpha_bar_t_prev) / (1 - alpha_bar_t)) * beta_t
+            noise = torch.randn_like(x_t)
+            sample_prev = mean + torch.sqrt(posterior_variance) * noise
+        else:
+            sample_prev = mean
         #######################
         return sample_prev
 
@@ -202,7 +222,8 @@ class DDPMScheduler(BaseScheduler):
         ######## TODO ########
         # DO NOT change the code outside this part.
         # Assignment 1. Implement the DDPM forward step.
-        x_t = None
+        alpha_bar_t = self._get_teeth(self.alphas_cumprod, t)
+        x_t = torch.sqrt(alpha_bar_t) * x_0 + torch.sqrt(1 - alpha_bar_t) * eps
         #######################
 
         return x_t, eps
@@ -248,7 +269,16 @@ class DDIMScheduler(BaseScheduler):
         #   - Store the step ratio in `self._ddim_step_ratio` for later use when computing previous t.
         #   - Compute a `step_ratio` that maps inference steps to training steps.
         # DO NOT change the code outside this part.
-        raise NotImplementedError("TODO")
+        self.num_inference_timesteps = num_inference_timesteps
+        self._ddim_step_ratio = self.num_train_timesteps // num_inference_timesteps
+        
+        timesteps = (
+            (np.arange(0, num_inference_timesteps) * self._ddim_step_ratio)
+            .round()[::-1]
+            .copy()
+            .astype(np.int64)
+        )
+        self.timesteps = torch.from_numpy(timesteps)
         #######################
 
     def _get_teeth(self, consts: torch.Tensor, t: torch.Tensor):
@@ -271,6 +301,25 @@ class DDIMScheduler(BaseScheduler):
         ######## TODO ########
         # DO NOT change the code outside this part.
         assert predictor == "noise", "In assignment 2, we only implement DDIM with noise predictor."
-        sample_prev = None
+        
+        t_tensor = torch.tensor([t], device=x_t.device)
+        alpha_prod_t = self._get_teeth(self.alphas_cumprod, t_tensor)
+        
+        t_prev = t - self._ddim_step_ratio
+        if t_prev >= 0:
+            t_prev_tensor = torch.tensor([t_prev], device=x_t.device)
+            alpha_prod_t_prev = self._get_teeth(self.alphas_cumprod, t_prev_tensor)
+        else:
+            alpha_prod_t_prev = torch.ones_like(alpha_prod_t)
+            
+        pred_x0 = (x_t - torch.sqrt(1 - alpha_prod_t) * eps_theta) / torch.sqrt(alpha_prod_t)
+        
+        variance = (1 - alpha_prod_t_prev) / (1 - alpha_prod_t) * (1 - alpha_prod_t / alpha_prod_t_prev)
+        sigma_t = self.eta * torch.sqrt(torch.clamp(variance, min=0))
+        
+        dir_xt = torch.sqrt(torch.clamp(1 - alpha_prod_t_prev - sigma_t**2, min=0)) * eps_theta
+        
+        noise = torch.randn_like(x_t) if t_prev >= 0 else torch.zeros_like(x_t)
+        sample_prev = torch.sqrt(alpha_prod_t_prev) * pred_x0 + dir_xt + sigma_t * noise
         #######################
         return sample_prev
