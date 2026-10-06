@@ -6,7 +6,7 @@
 export MODEL_NAME="CompVis/stable-diffusion-v1-4"
 export TRAIN_DATA_DIR="./sample_data/artistic-custom"
 export OUTPUT_DIR="./runs/artistic_custom"
-MIXED_PRECISION="no"
+MIXED_PRECISION="fp16"
 IMAGE_COLUMN="image"
 CAPTION_COLUMN="text"
 RESOLUTION=512
